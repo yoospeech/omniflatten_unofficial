@@ -246,3 +246,23 @@ SUMM_RE_OUTPUT_DIR=/tmp/summ-re-check SUMM_RE_MAX_SEGMENTS=2 \
 ```
 
 CPU ONNX 토크나이저를 사용하므로 전체 준비에는 시간이 걸립니다. 이 스크립트는 Stage 1의 음성-전사 데이터를 생성하며, assistant 답변이 포함된 Stage 2·3 학습 데이터는 별도로 준비해야 합니다.
+
+### GPU로 음성 토큰 추출
+
+CUDA 지원 ONNX Runtime은 CPU용과 분리해 `.runtime-ort-gpu/`에 설치할 수 있습니다. 이 프로젝트에서는 다음 명령으로 설치했습니다.
+
+```bash
+/data/util/anaconda3/envs/duplexomni/bin/python -m pip install \
+  --target .runtime-ort-gpu --no-deps onnxruntime-gpu==1.23.2
+```
+
+GPU 하나를 선택해 전처리하려면:
+
+```bash
+SUMM_RE_DEVICE=cuda:0 bash scripts/prepare_summ_re_full.sh
+# 또는 두 번째 GPU: SUMM_RE_DEVICE=cuda:1
+```
+
+기본값은 `SUMM_RE_DEVICE=cpu`입니다. GPU 추론 시 CUDA Execution Provider가 로드되지 않으면 조용히 CPU로 진행하지 않고 오류를 냅니다. 일부 연산과 오디오·멜 전처리는 CPU에서 수행될 수 있습니다. CPU 전처리를 이미 실행 중이라면 해당 터미널에서 `Ctrl+C`로 중단하고 종료된 것을 확인한 뒤 GPU 명령을 실행하세요. 같은 출력 디렉터리에서 마지막 완료 구간부터 재개합니다. 두 개의 GPU를 **동시에 사용하는 기능은 아직 없으며**, 같은 출력 폴더에 프로세스 두 개를 실행할 수 없습니다.
+
+CPU와 GPU 결과는 테스트한 6개 음성에서 토큰이 일치했습니다. 서로 다른 실행 장치와 ONNX Runtime 버전의 부동소수점 계산 차이로 모든 샘플에서 토큰이 완전히 같다고 보장할 수는 없습니다. 동일한 장치·버전으로 전체를 처리하는 것이 정확한 재현에는 유리합니다.

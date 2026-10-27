@@ -229,6 +229,7 @@ def main():
     parser.add_argument('--max-duration', type=float, default=12.0)
     parser.add_argument('--max-segments', type=int, default=0, help='Per split; 0 processes all segments')
     parser.add_argument('--threads', type=int, default=2)
+    parser.add_argument('--device', default='cpu', help='cpu or cuda:<GPU index>')
     args = parser.parse_args()
     if not math.isfinite(args.max_duration) or not 0 < args.max_duration <= 30:
         parser.error('--max-duration must be > 0 and <= 30')
@@ -238,7 +239,8 @@ def main():
     meetings = audit_meetings(args.arrow_dir)
     signature = fingerprint(args.arrow_dir, args.codec_dir, args.max_duration)
     print(f'SUMM-RE meetings per split: {meetings}; existing official splits retained', flush=True)
-    codec = CosyVoiceSpeechTokenizer(args.codec_dir, num_threads=args.threads)
+    codec = CosyVoiceSpeechTokenizer(args.codec_dir, num_threads=args.threads, device=args.device)
+    print(f'ONNX Runtime providers: {codec.session.get_providers()}', flush=True)
     results = {}
     for source_split, target_split in SPLITS.items():
         results[target_split] = process_split(source_split, target_split, args.arrow_dir,

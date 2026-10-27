@@ -15,6 +15,10 @@ output_dir="${SUMM_RE_OUTPUT_DIR:-$project_dir/prepared_data/summ_re_full}"
 max_duration="${SUMM_RE_MAX_DURATION:-12}"
 threads="${SUMM_RE_THREADS:-2}"
 max_segments="${SUMM_RE_MAX_SEGMENTS:-0}"
+device="${SUMM_RE_DEVICE:-cpu}"
+if [[ "$device" == cuda:* && -d "$project_dir/.runtime-ort-gpu" ]]; then
+  export PYTHONPATH="$project_dir/.runtime-ort-gpu:$PYTHONPATH"
+fi
 
 if [[ "${1:-}" == "--help" ]]; then
   cat <<'EOF'
@@ -26,6 +30,7 @@ Optional environment variables:
   SUMM_RE_OUTPUT_DIR    Output directory (default: prepared_data/summ_re_full)
   SUMM_RE_MAX_DURATION  Maximum fragment length in seconds (default: 12)
   SUMM_RE_THREADS       CPU threads for the ONNX tokenizer (default: 2)
+  SUMM_RE_DEVICE        cpu, cuda:0 or cuda:1 (default: cpu)
   SUMM_RE_MAX_SEGMENTS  Limit per split for testing; 0 means all (default: 0)
 Rerun the same command after interruption to resume from the last segment.
 EOF
@@ -64,4 +69,4 @@ fi
 printf 'Python: %s\nArrow cache: %s\nCodec: %s\nOutput: %s\n' "$python_bin" "$arrow_dir" "$codec_dir" "$output_dir"
 "$python_bin" scripts/prepare_summ_re_full.py \
   --arrow-dir "$arrow_dir" --codec-dir "$codec_dir" --output-dir "$output_dir" \
-  --max-duration "$max_duration" --max-segments "$max_segments" --threads "$threads"
+  --max-duration "$max_duration" --max-segments "$max_segments" --threads "$threads" --device "$device"

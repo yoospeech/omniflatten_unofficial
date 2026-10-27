@@ -15,14 +15,29 @@ class CosyVoiceSpeechTokenizer:
     sample_rate = 16000
     token_rate = 50
 
-    def __init__(self, model_dir, num_threads=2):
+    def __init__(self, model_dir, num_threads=2, device='cpu'):
         import onnxruntime as ort
+        if device == 'cpu':
+            providers = ['CPUExecutionProvider']
+        elif device.startswith('cuda:') and device[5:].isdigit():
+            if 'CUDAExecutionProvider' not in ort.get_available_providers():
+                raise RuntimeError('CUDA ONNX Runtime is unavailable; install onnxruntime-gpu and check PYTHONPATH')
+            device_id = int(device[5:])
+            if not torch.cuda.is_available() or device_id >= torch.cuda.device_count():
+                raise RuntimeError(f'CUDA device {device_id} is not available')
+            providers = [('CUDAExecutionProvider', {'device_id': device_id,
+                         'cudnn_conv_algo_search': 'HEURISTIC'}), 'CPUExecutionProvider']
+        else:
+            raise ValueError("device must be 'cpu' or 'cuda:<index>'")
         path = Path(model_dir) / 'speech_tokenizer_v1.onnx'
         if not path.is_file():
             raise FileNotFoundError(f'Missing CosyVoice v1 tokenizer: {path}')
         options = ort.SessionOptions()
         options.intra_op_num_threads = num_threads
-        self.session = ort.InferenceSession(str(path), sess_options=options, providers=['CPUExecutionProvider'])
+        self.session = ort.InferenceSession(str(path), sess_options=options, providers=providers)
+        if device != 'cpu' and 'CUDAExecutionProvider' not in self.session.get_providers():
+            raise RuntimeError('CUDA provider failed to initialize; refusing to silently run on CPU')
+        self.device = device
 
     @torch.inference_mode()
     def encode(self, waveform):

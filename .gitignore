@@ -6,3 +6,4 @@ checkpoints/
 prepared_data/
 .validation/
 pretrained_models/
+.runtime-ort-gpu/
