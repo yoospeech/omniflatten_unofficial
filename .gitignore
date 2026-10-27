@@ -1,0 +1,8 @@
+.runtime/
+__pycache__/
+*.pyc
+outputs/
+checkpoints/
+prepared_data/
+.validation/
+pretrained_models/

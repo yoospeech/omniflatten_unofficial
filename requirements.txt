@@ -1,0 +1,19 @@
+# Versions exercised with Python 3.11; install the matching torchaudio build.
+torch>=2.2,<3
+torchaudio>=2.2,<3
+transformers==4.57.6
+huggingface-hub==0.36.0
+datasets==4.4.1
+fsspec==2025.10.0
+accelerate==1.12.0
+tokenizers>=0.22,<=0.23.0
+soundfile
+numpy
+pyyaml
+# Real codec: install FunAudioLLM/CosyVoice and its own requirements separately.
+# Precomputed raw speech codebook IDs allow training without loading the codec.
+
+# Standalone pretrained v1 speech-token extraction (no TTS stack required).
+onnxruntime==1.31.1
+openai-whisper==20250625
+more-itertools==11.2.1
