@@ -36,12 +36,19 @@ class ModalityAlignmentDataset(Dataset):
         text = self.tokenizer.encode(entry['text'], add_special_tokens=False)
         s = self.special_ids
         if task=='asr':
-            prefix = [s['ASR'], s['SOS']] + speech + [s['EOS'], s['SOT']]
-            target = text + [s['EOT']]
+            # Predict [SOT] from the encoded speech [EOS], then transcribe text.
+            # Keeping [SOT] in the supervised target teaches the modality
+            # boundary instead of providing it only as an input prefix.
+            prefix = [s['ASR'], s['SOS']] + speech + [s['EOS']]
+            target = [s['SOT']] + text + [s['EOT']]
         else:
-            prefix = [s['TTS'], s['SOT']] + text + [s['EOT'], s['SOS']]
-            target = speech + [s['EOS']]
+            prefix = [s['TTS'], s['SOT']] + text + [s['EOT']]
+            target = [s['SOS']] + speech + [s['EOS']]
         # Condition on the source and supervise the target, a declared SFT choice.
-        return sample(prefix+target, [-100]*len(prefix)+target, self.max_seq_len)
+        result = sample(prefix+target, [-100]*len(prefix)+target, self.max_seq_len)
+        # Kept separate from vocabulary IDs: the trainer uses this to balance
+        # ASR and TTS losses without changing either task's token sequence.
+        result['task_id'] = torch.tensor(0 if task == 'asr' else 1, dtype=torch.long)
+        return result
 
 modality_alignment_collate_fn = collate

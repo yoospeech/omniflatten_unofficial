@@ -65,8 +65,10 @@ class CoreTests(unittest.TestCase):
         s=self.s
         expected=[s['ASR'],s['SOS'],13,14,s['EOS'],s['SOT'],0,1,s['EOT']]
         self.assertEqual(ds[0]['input_ids'].tolist(),expected)
-        self.assertEqual(ds[0]['labels'].tolist(),[-100]*6+[0,1,s['EOT']])
+        self.assertEqual(ds[0]['labels'].tolist(),[-100]*5+[s['SOT'],0,1,s['EOT']])
+        self.assertEqual(ds[0]['task_id'].item(),0)
         self.assertEqual(ds[1]['input_ids'].tolist(),[s['TTS'],s['SOT'],0,1,s['EOT'],s['SOS'],13,14,s['EOS']])
+        self.assertEqual(ds[1]['task_id'].item(),1)
         self.assertEqual(len(ds),2)
 
     def test_half_duplex_user_mask_and_zero_token_attention(self):
@@ -109,6 +111,27 @@ class CoreTests(unittest.TestCase):
         empty=self.model(input_ids=torch.tensor([[0,1]]),labels=torch.tensor([[-100,-100]])).loss
         self.assertEqual(empty.item(),0.)
         empty.backward()
+
+    def test_chunked_loss_and_gradients_match_full_projection(self):
+        import copy
+        import torch.nn.functional as F
+        ref = copy.deepcopy(self.model)
+        self.model.eval(); ref.eval()
+        ids = torch.tensor([[0, 13, 14, 1, 2, 15, 3, 0, 1, 2, 15, 13, 14, 1, 2] * 4])
+        labels = ids.clone()
+        labels[:, :3] = -100
+        mask = torch.ones_like(ids)
+        mask[:, 7] = 0
+        actual = self.model(ids, labels=labels, loss_mask=mask).loss
+        targets = labels[:, 1:].clone()
+        targets[mask[:, 1:] == 0] = -100
+        logits = ref.backbone(ids, use_cache=False).logits[:, :-1].float()
+        expected = F.cross_entropy(logits.reshape(-1, logits.size(-1)), targets.reshape(-1), ignore_index=-100)
+        torch.testing.assert_close(actual, expected)
+        actual.backward(); expected.backward()
+        for (name, p), (_, q) in zip(self.model.named_parameters(), ref.named_parameters()):
+            if p.grad is not None:
+                torch.testing.assert_close(p.grad, q.grad, rtol=1e-4, atol=1e-6, msg=lambda msg: name + ': ' + msg)
 
     def test_cache_matches_full_context_and_modality_constraints(self):
         engine=OmniFlattenInference(self.model,None,None,self.tokenizer,InferenceConfig(max_response_chunks=0))

@@ -24,6 +24,10 @@ def collate(batch, pad_token_id=0, label_pad_value=-100):
         result['loss_mask'] = pad_sequence(
             [s.get('loss_mask', (s['labels'] != -100).long()) for s in batch],
             batch_first=True, padding_value=0)
+    if any('task_id' in s for s in batch):
+        if not all('task_id' in s for s in batch):
+            raise ValueError('task_id must be present for every item in a batch')
+        result['task_id'] = torch.stack([s['task_id'] for s in batch])
     return result
 
 

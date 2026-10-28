@@ -5,6 +5,7 @@ import json
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.utils.checkpoint import checkpoint
 from transformers import AutoModelForCausalLM
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from omniflatten.tokens import SPECIAL_TOKENS, TokenLayout
@@ -81,26 +82,52 @@ class OmniFlattenModel(nn.Module):
             raise ValueError('Not speech vocabulary IDs')
         return codes
 
-    def forward(self, input_ids, attention_mask=None, labels=None, loss_mask=None,
+    def forward(self, input_ids, attention_mask=None, labels=None, loss_mask=None, loss_weight=None,
                 past_key_values=None, use_cache=None, **kwargs):
-        output = self.backbone(input_ids=input_ids, attention_mask=attention_mask,
-                               past_key_values=past_key_values,
-                               use_cache=(labels is None) if use_cache is None else use_cache,
-                               return_dict=True, **kwargs)
-        loss = None
-        if labels is not None:
-            targets = labels[:, 1:].clone()
-            if attention_mask is not None:
-                targets.masked_fill_(attention_mask[:, 1:] == 0, -100)
-            if loss_mask is not None:
-                targets.masked_fill_(loss_mask[:, 1:] == 0, -100)
-            logits = output.logits[:, :-1].float()
-            # Normalize by supervised tokens, never by padding or user tokens.
-            loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), targets.reshape(-1),
-                                   ignore_index=-100, reduction='sum')
-            loss = loss / (targets != -100).sum().clamp_min(1)
-        return CausalLMOutputWithPast(loss=loss, logits=output.logits,
-                                     past_key_values=output.past_key_values)
+        if labels is None:
+            output = self.backbone(input_ids=input_ids, attention_mask=attention_mask,
+                                   past_key_values=past_key_values,
+                                   use_cache=True if use_cache is None else use_cache,
+                                   return_dict=True, **kwargs)
+            return CausalLMOutputWithPast(logits=output.logits,
+                                         past_key_values=output.past_key_values)
+        if past_key_values is not None or use_cache:
+            raise ValueError('Cached training with labels is not supported')
+        # Do not create a (batch, sequence, vocabulary) logits tensor. Qwen2's
+        # vocabulary exceeds 150k, so this can consume gigabytes by itself.
+        output = self.backbone.model(input_ids=input_ids, attention_mask=attention_mask,
+                                     use_cache=False, return_dict=True, **kwargs)
+        targets = labels[:, 1:].clone()
+        if attention_mask is not None:
+            targets.masked_fill_(attention_mask[:, 1:] == 0, -100)
+        if loss_mask is not None:
+            targets.masked_fill_(loss_mask[:, 1:] == 0, -100)
+        hidden = output.last_hidden_state[:, :-1, :]
+        valid = targets != -100
+        selected_hidden = hidden[valid]
+        selected_targets = targets[valid]
+        selected_weights = loss_weight[:, 1:][valid] if loss_weight is not None else None
+        head = self.backbone.get_output_embeddings()
+
+        def chunk_loss(states, target, weights=None):
+            logits = head(states).float()
+            losses = F.cross_entropy(logits, target, reduction='none')
+            return losses.sum() if weights is None else (losses * weights).sum()
+
+        # Checkpoint each small projection: logits are recomputed during
+        # backward instead of retained for all chunks simultaneously.
+        loss = hidden.sum() * 0.0
+        for start in range(0, selected_targets.numel(), 32):
+            states = selected_hidden[start:start+32]
+            target = selected_targets[start:start+32]
+            weights = None if selected_weights is None else selected_weights[start:start+32]
+            if torch.is_grad_enabled():
+                loss = loss + checkpoint(chunk_loss, states, target, weights, use_reentrant=False)
+            else:
+                loss = loss + chunk_loss(states, target, weights)
+        denominator = valid.sum() if selected_weights is None else selected_weights.sum()
+        loss = loss / denominator.clamp_min(1)
+        return CausalLMOutputWithPast(loss=loss, logits=None)
 
     def save_pretrained(self, path, tokenizer):
         if self.layout is None:
